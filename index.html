@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Vowel EQ Segment Sorter</title>
+
+<!-- SortableJS for drag-and-drop reordering -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+
+<style>
+  /* ── Reset & Base ──────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #111117;
+    --surface: #1a1a24;
+    --surface2: #23233a;
+    --border: #333350;
+    --text: #e0e0ec;
+    --text-dim: #888899;
+    --accent: #5b8aff;
+    --accent-glow: #5b8aff44;
+    --dry: #44bb77;
+    --active: #ff9f43;
+    --active-bg: #ff9f4318;
+    --danger: #ff5566;
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    font-size: 15px;
+    line-height: 1.4;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  /* ── Layout ────────────────────────────────────────────── */
+  #app {
+    max-width: 700px;
+    margin: 0 auto;
+    padding: 12px;
+    padding-bottom: 100px;
+  }
+
+  header {
+    text-align: center;
+    padding: 12px 0 8px;
+  }
+  header h1 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  header .subtitle {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  /* ── Upload area ───────────────────────────────────────── */
+  #upload-area {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 28px 16px;
+    text-align: center;
+    margin: 10px 0;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  #upload-area:hover, #upload-area.dragover {
+    border-color: var(--accent);
+  }
+  #upload-area input { display: none; }
+  #upload-area .label {
+    font-size: 0.95rem;
+    color: var(--text-dim);
+  }
+  #upload-area .label strong { color: var(--accent); }
+
+  #file-name {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-align: center;
+    margin: 4px 0 8px;
+    min-height: 1.2em;
+  }
+
+  /* ── Waveform ──────────────────────────────────────────── */
+  #waveform-wrap {
+    position: relative;
+    background: var(--surface);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 8px 0;
+    display: none; /* shown after load */
+  }
+  #waveform-canvas {
+    display: block;
+    width: 100%;
+    height: 100px;
+    cursor: pointer;
+  }
+  /* Segment separator lines are drawn on the canvas */
+  #playhead {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 2px;
+    background: var(--active);
+    pointer-events: none;
+    left: 0;
+    transition: none;
+    z-index: 2;
+  }
+
+  /* ── Transport ─────────────────────────────────────────── */
+  #transport {
+    display: none; /* shown after load */
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 0;
+    flex-wrap: wrap;
+  }
+  .t-btn {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 0.92rem;
+    cursor: pointer;
+    user-select: none;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+  }
+  .t-btn:hover { background: var(--border); }
+  .t-btn:active { background: var(--accent); }
+  .t-btn.playing { background: var(--accent); color: #fff; }
+
+  #status-line {
+    display: none;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    padding: 2px 0 6px;
+    min-height: 1.4em;
+  }
+
+  /* ── Segment list ──────────────────────────────────────── */
+  #segment-list-wrap {
+    display: none;
+    margin-top: 6px;
+  }
+  #segment-list-wrap h2 {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+
+  .seg-row {
+    display: flex;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 5px;
+    padding: 10px 12px;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    min-height: 52px;
+    transition: background 0.15s, border-color 0.15s;
+    user-select: none;
+  }
+  .seg-row:hover { border-color: var(--accent); }
+  .seg-row.active {
+    border-color: var(--active);
+    background: var(--active-bg);
+  }
+  .seg-row.locked {
+    border-color: var(--dry);
+    cursor: pointer;
+  }
+
+  /* Mini progress bar overlay inside each row */
+  .seg-progress {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: rgba(255, 159, 67, 0.12);
+    width: 0%;
+    pointer-events: none;
+    transition: none;
+  }
+
+  .seg-drag-handle {
+    color: var(--text-dim);
+    font-size: 1.1rem;
+    margin-right: 10px;
+    cursor: grab;
+    touch-action: none;
+    flex-shrink: 0;
+    width: 22px;
+    text-align: center;
+  }
+  .seg-drag-handle.hidden { visibility: hidden; }
+
+  .seg-info {
+    flex: 1;
+    position: relative;
+    z-index: 1;
+  }
+  .seg-label {
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+  .seg-time {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+  }
+
+  .seg-number {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    background: var(--surface2);
+    border-radius: 4px;
+    padding: 2px 7px;
+    position: relative;
+    z-index: 1;
+    flex-shrink: 0;
+    margin-left: 8px;
+  }
+
+  /* SortableJS ghost styling */
+  .sortable-ghost {
+    opacity: 0.4;
+  }
+  .sortable-chosen {
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+
+  /* ── Action buttons row ────────────────────────────────── */
+  #actions-row {
+    display: none;
+    gap: 6px;
+    justify-content: center;
+    padding: 6px 0;
+    flex-wrap: wrap;
+  }
+  .action-btn {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .action-btn:hover { background: var(--border); }
+  .action-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* ── Help panel ────────────────────────────────────────── */
+  #help-panel {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-top: 8px;
+  }
+  #help-panel h3 {
+    font-size: 0.88rem;
+    margin-bottom: 8px;
+    color: var(--accent);
+  }
+
+  /* Cheat sheet table */
+  .cheat-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 14px;
+    font-size: 0.82rem;
+  }
+  .cheat-table th, .cheat-table td {
+    padding: 5px 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .cheat-table th { color: var(--text-dim); font-weight: 600; }
+
+  /* Analyzer canvas */
+  #analyzer-canvas {
+    width: 100%;
+    height: 80px;
+    display: block;
+    background: var(--bg);
+    border-radius: 6px;
+    margin-bottom: 10px;
+  }
+
+  /* Solo buttons */
+  #solo-buttons {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+  .solo-btn {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    min-height: 38px;
+  }
+  .solo-btn:hover { background: var(--border); }
+  .solo-btn.active { background: var(--danger); color: #fff; border-color: var(--danger); }
+
+  /* ── Keyboard hints ────────────────────────────────────── */
+  #key-hints {
+    text-align: center;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    padding: 10px 0;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <h1>Vowel EQ Segment Sorter</h1>
+    <p class="subtitle">Upload a 6-segment WAV &middot; Drag to reorder by brightness</p>
+  </header>
+
+  <!-- Upload -->
+  <div id="upload-area">
+    <label class="label" for="file-input">
+      <strong>Choose WAV file</strong> or drag &amp; drop
+    </label>
+    <input type="file" id="file-input" accept=".wav,audio/wav">
+  </div>
+  <div id="file-name"></div>
+
+  <!-- Waveform -->
+  <div id="waveform-wrap">
+    <canvas id="waveform-canvas"></canvas>
+    <div id="playhead"></div>
+  </div>
+
+  <!-- Transport -->
+  <div id="transport">
+    <button class="t-btn" id="btn-stop" title="Stop">&#9632;</button>
+    <button class="t-btn" id="btn-prev" title="Prev segment">&laquo;</button>
+    <button class="t-btn" id="btn-play" title="Play / Pause">&#9654;</button>
+    <button class="t-btn" id="btn-next" title="Next segment">&raquo;</button>
+  </div>
+
+  <!-- Status -->
+  <div id="status-line"></div>
+
+  <!-- Segment list -->
+  <div id="segment-list-wrap">
+    <h2>Segments</h2>
+    <!-- Row 1 (locked) is placed outside sortable container -->
+    <div id="locked-row"></div>
+    <div id="sortable-list"></div>
+  </div>
+
+  <!-- Actions row -->
+  <div id="actions-row">
+    <button class="action-btn" id="btn-reset-order">Reset order</button>
+    <button class="action-btn" id="btn-help">Help</button>
+  </div>
+
+  <!-- Help panel -->
+  <div id="help-panel">
+    <h3>Vowel / Frequency Cheat Sheet</h3>
+    <table class="cheat-table">
+      <tr><th>Vowel</th><th>Center Freq</th></tr>
+      <tr><td>OO</td><td>250 Hz</td></tr>
+      <tr><td>O</td><td>500 Hz</td></tr>
+      <tr><td>AH</td><td>1 kHz</td></tr>
+      <tr><td>A</td><td>2 kHz</td></tr>
+      <tr><td>EE</td><td>4 kHz</td></tr>
+    </table>
+    <canvas id="analyzer-canvas"></canvas>
+    <div id="solo-buttons">
+      <button class="solo-btn" data-freq="250">Solo 250</button>
+      <button class="solo-btn" data-freq="500">Solo 500</button>
+      <button class="solo-btn" data-freq="1000">Solo 1k</button>
+      <button class="solo-btn" data-freq="2000">Solo 2k</button>
+      <button class="solo-btn" data-freq="4000">Solo 4k</button>
+      <button class="solo-btn active" data-freq="0">Off</button>
+    </div>
+  </div>
+
+  <!-- Keyboard hints -->
+  <div id="key-hints">
+    Space = Play/Pause &middot; 1-6 = Jump to original segment &middot; &larr;&rarr; = Prev/Next
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+// Vowel EQ Segment Sorter — single-file Web Audio app
+// ════════════════════════════════════════════════════════════
+
+(function () {
+  'use strict';
+
+  // ── DOM refs ──────────────────────────────────────────────
+  const uploadArea   = document.getElementById('upload-area');
+  const fileInput    = document.getElementById('file-input');
+  const fileNameEl   = document.getElementById('file-name');
+  const waveWrap     = document.getElementById('waveform-wrap');
+  const waveCanvas   = document.getElementById('waveform-canvas');
+  const playheadEl   = document.getElementById('playhead');
+  const transportEl  = document.getElementById('transport');
+  const btnPlay      = document.getElementById('btn-play');
+  const btnStop      = document.getElementById('btn-stop');
+  const btnPrev      = document.getElementById('btn-prev');
+  const btnNext      = document.getElementById('btn-next');
+  const statusLine   = document.getElementById('status-line');
+  const segListWrap  = document.getElementById('segment-list-wrap');
+  const lockedRow    = document.getElementById('locked-row');
+  const sortableList = document.getElementById('sortable-list');
+  const actionsRow   = document.getElementById('actions-row');
+  const btnResetOrder= document.getElementById('btn-reset-order');
+  const btnHelp      = document.getElementById('btn-help');
+  const helpPanel    = document.getElementById('help-panel');
+  const analyzerCanvas = document.getElementById('analyzer-canvas');
+  const soloButtons  = document.querySelectorAll('.solo-btn');
+  const keyHints     = document.getElementById('key-hints');
+
+  // ── Audio state ───────────────────────────────────────────
+  let audioCtx       = null;
+  let audioBuffer    = null;
+  let sourceNode     = null;
+  let gainNode       = null;
+  let bandpassNode   = null;
+  let analyserNode   = null;
+
+  // Crossfade nodes
+  let fadeGainNode   = null;
+
+  const NUM_SEGMENTS = 6;
+  let segDuration    = 0;      // seconds per segment
+  let totalDuration  = 0;
+
+  // Playback state
+  let isPlaying      = false;
+  let currentTime    = 0;      // virtual playback position within the WAV
+  let playStartWall  = 0;      // performance.now() when play started
+  let playStartOfs   = 0;      // currentTime when play started
+  let activeSegIdx   = 0;      // index into playOrder (0-based)
+  let rafId          = null;
+
+  // Reorder state: playOrder[0] is always 0 (segment 1 = dry)
+  // playOrder[1..5] are indices 1..5 representing segments 2–6
+  let playOrder = [0, 1, 2, 3, 4, 5];
+
+  // Solo band state
+  let soloFreq = 0; // 0 = off
+
+  // Analyzer state
+  let helpOpen = false;
+  let analyzerRafId = null;
+
+  // iOS audio unlock flag
+  let audioUnlocked = false;
+
+  // ── Utility ───────────────────────────────────────────────
+  function formatTime(s) {
+    if (!isFinite(s)) return '0:00';
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+  }
+
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  // ── Audio context init ────────────────────────────────────
+  function ensureAudioCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    // Resume if suspended (iOS requirement)
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  // iOS audio unlock — attach to first user gesture
+  function unlockAudio() {
+    if (audioUnlocked) return;
+    ensureAudioCtx();
+    // Create and play a silent buffer to unlock
+    const buf = audioCtx.createBuffer(1, 1, 22050);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+    src.start(0);
+    audioUnlocked = true;
+  }
+
+  document.addEventListener('touchstart', unlockAudio, { once: true });
+  document.addEventListener('click', unlockAudio, { once: true });
+
+  // ── Build audio graph ─────────────────────────────────────
+  // sourceNode -> fadeGainNode -> bandpassNode -> gainNode -> analyserNode -> destination
+  function buildGraph() {
+    ensureAudioCtx();
+
+    // Clean up old nodes
+    if (analyserNode) { try { analyserNode.disconnect(); } catch(e){} }
+
+    // Fade gain (for crossfade)
+    fadeGainNode = audioCtx.createGain();
+    fadeGainNode.gain.value = 1.0;
+
+    // Bandpass filter (for solo)
+    bandpassNode = audioCtx.createBiquadFilter();
+    bandpassNode.type = 'bandpass';
+    bandpassNode.frequency.value = 1000;
+    bandpassNode.Q.value = 2;
+
+    // Main gain
+    gainNode = audioCtx.createGain();
+    gainNode.gain.value = 1.0;
+
+    // Analyser
+    analyserNode = audioCtx.createAnalyser();
+    analyserNode.fftSize = 2048;
+
+    // Connect: fadeGain -> (bandpass or bypass) -> gain -> analyser -> dest
+    updateSoloRouting();
+  }
+
+  function updateSoloRouting() {
+    if (!fadeGainNode || !gainNode || !analyserNode) return;
+
+    // Disconnect everything first
+    try { fadeGainNode.disconnect(); } catch(e){}
+    try { bandpassNode.disconnect(); } catch(e){}
+    try { gainNode.disconnect(); } catch(e){}
+    try { analyserNode.disconnect(); } catch(e){}
+
+    if (soloFreq > 0) {
+      bandpassNode.frequency.value = soloFreq;
+      fadeGainNode.connect(bandpassNode);
+      bandpassNode.connect(gainNode);
+    } else {
+      fadeGainNode.connect(gainNode);
+    }
+
+    gainNode.connect(analyserNode);
+    analyserNode.connect(audioCtx.destination);
+
+    // Reconnect source if it exists
+    if (sourceNode) {
+      try { sourceNode.disconnect(); } catch(e){}
+      sourceNode.connect(fadeGainNode);
+    }
+  }
+
+  // ── Load audio buffer ─────────────────────────────────────
+  async function loadAudioBuffer(arrayBuf, fileName) {
+    ensureAudioCtx();
+    try {
+      audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
+    } catch (e) {
+      alert('Could not decode audio. Please use a valid WAV file.');
+      return;
+    }
+
+    totalDuration = audioBuffer.duration;
+    segDuration   = totalDuration / NUM_SEGMENTS;
+
+    fileNameEl.textContent = fileName + ' (' + formatTime(totalDuration) + ')';
+
+    // Reset state
+    stopPlayback();
+    currentTime = 0;
+    activeSegIdx = 0;
+    playOrder = [0, 1, 2, 3, 4, 5];
+
+    // Build the audio graph
+    buildGraph();
+
+    // Draw waveform
+    drawWaveform();
+
+    // Build segment list UI
+    buildSegmentList();
+
+    // Show UI elements
+    waveWrap.style.display = 'block';
+    transportEl.style.display = 'flex';
+    statusLine.style.display = 'block';
+    segListWrap.style.display = 'block';
+    actionsRow.style.display = 'flex';
+    keyHints.style.display = 'block';
+
+    updateStatus();
+    updatePlayhead();
+  }
+
+  // ── Waveform drawing ──────────────────────────────────────
+  function drawWaveform() {
+    const canvas = waveCanvas;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width  = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    const w = rect.width;
+    const h = rect.height;
+
+    ctx.clearRect(0, 0, w, h);
+
+    if (!audioBuffer) return;
+
+    // Mono sum
+    const ch0 = audioBuffer.getChannelData(0);
+    const ch1 = audioBuffer.numberOfChannels > 1 ? audioBuffer.getChannelData(1) : ch0;
+    const len = ch0.length;
+
+    // Downsample to canvas width
+    const samplesPerPx = Math.floor(len / w);
+    const mid = h / 2;
+
+    ctx.fillStyle = '#5b8aff44';
+    ctx.strokeStyle = '#5b8aff';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+
+    for (let x = 0; x < w; x++) {
+      let min = 1, max = -1;
+      const start = Math.floor(x * len / w);
+      const end   = Math.floor((x + 1) * len / w);
+      for (let i = start; i < end; i++) {
+        const s = (ch0[i] + ch1[i]) * 0.5;
+        if (s < min) min = s;
+        if (s > max) max = s;
+      }
+      const yMin = mid - max * mid;
+      const yMax = mid - min * mid;
+      ctx.fillRect(x, yMin, 1, yMax - yMin);
+    }
+
+    // Draw segment separators
+    ctx.strokeStyle = '#ff9f4388';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    for (let i = 1; i < NUM_SEGMENTS; i++) {
+      const xPos = (i * segDuration / totalDuration) * w;
+      ctx.beginPath();
+      ctx.moveTo(xPos, 0);
+      ctx.lineTo(xPos, h);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // Segment number labels at the top
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff88';
+    for (let i = 0; i < NUM_SEGMENTS; i++) {
+      const xCenter = ((i + 0.5) * segDuration / totalDuration) * w;
+      ctx.fillText((i + 1).toString(), xCenter, 12);
+    }
+  }
+
+  // Handle resize
+  window.addEventListener('resize', () => {
+    if (audioBuffer) drawWaveform();
+  });
+
+  // ── Segment list UI ───────────────────────────────────────
+  function buildSegmentList() {
+    // Locked row (Segment 1 = Dry)
+    lockedRow.innerHTML = '';
+    const row0 = createSegRow(0, true);
+    lockedRow.appendChild(row0);
+
+    // Sortable rows 2–6
+    sortableList.innerHTML = '';
+    for (let i = 1; i < NUM_SEGMENTS; i++) {
+      const row = createSegRow(i, false);
+      sortableList.appendChild(row);
+    }
+
+    // Init SortableJS
+    if (sortableList._sortable) sortableList._sortable.destroy();
+    sortableList._sortable = new Sortable(sortableList, {
+      animation: 150,
+      handle: '.seg-drag-handle',
+      ghostClass: 'sortable-ghost',
+      chosenClass: 'sortable-chosen',
+      onEnd: onDragEnd,
+    });
+
+    updateSegHighlights();
+  }
+
+  function createSegRow(origIdx, locked) {
+    const row = document.createElement('div');
+    row.className = 'seg-row' + (locked ? ' locked' : '');
+    row.dataset.origIdx = origIdx;
+
+    const progress = document.createElement('div');
+    progress.className = 'seg-progress';
+    row.appendChild(progress);
+
+    const handle = document.createElement('div');
+    handle.className = 'seg-drag-handle' + (locked ? ' hidden' : '');
+    handle.textContent = '⠿';
+    row.appendChild(handle);
+
+    const info = document.createElement('div');
+    info.className = 'seg-info';
+
+    const label = document.createElement('div');
+    label.className = 'seg-label';
+    label.textContent = locked ? 'Dry / Reference' : 'Segment ' + (origIdx + 1);
+    info.appendChild(label);
+
+    const time = document.createElement('div');
+    time.className = 'seg-time';
+    const startT = origIdx * segDuration;
+    const endT   = (origIdx + 1) * segDuration;
+    time.textContent = formatTime(startT) + ' – ' + formatTime(endT);
+    info.appendChild(time);
+
+    row.appendChild(info);
+
+    const num = document.createElement('div');
+    num.className = 'seg-number';
+    num.textContent = '#' + (origIdx + 1);
+    row.appendChild(num);
+
+    // Click to jump + play
+    row.addEventListener('click', (e) => {
+      // Don't trigger on drag handle
+      if (e.target.classList.contains('seg-drag-handle')) return;
+      jumpToOriginalSegment(origIdx, true);
+    });
+
+    return row;
+  }
+
+  function onDragEnd() {
+    // Read new order from DOM
+    const rows = sortableList.querySelectorAll('.seg-row');
+    const newOrder = [0]; // segment 1 always first
+    rows.forEach(r => {
+      newOrder.push(parseInt(r.dataset.origIdx));
+    });
+    playOrder = newOrder;
+    updateStatus();
+  }
+
+  function updateSegHighlights() {
+    // Active segment original index
+    const activeOrigIdx = playOrder[activeSegIdx];
+    const allRows = document.querySelectorAll('.seg-row');
+    allRows.forEach(r => {
+      const idx = parseInt(r.dataset.origIdx);
+      r.classList.toggle('active', idx === activeOrigIdx);
+    });
+  }
+
+  function updateSegProgress() {
+    const activeOrigIdx = playOrder[activeSegIdx];
+    const segStart = activeOrigIdx * segDuration;
+    const progress = clamp((currentTime - segStart) / segDuration, 0, 1);
+
+    const allRows = document.querySelectorAll('.seg-row');
+    allRows.forEach(r => {
+      const idx = parseInt(r.dataset.origIdx);
+      const bar = r.querySelector('.seg-progress');
+      if (idx === activeOrigIdx) {
+        bar.style.width = (progress * 100) + '%';
+      } else {
+        bar.style.width = '0%';
+      }
+    });
+  }
+
+  // ── Playback engine ───────────────────────────────────────
+  // We use a simple approach: schedule a BufferSourceNode from a given offset
+  // and track time manually. On segment boundary, crossfade and start new source.
+
+  const CROSSFADE_MS = 15; // 15ms crossfade
+
+  function startSource(offset) {
+    if (sourceNode) {
+      try { sourceNode.stop(); } catch(e){}
+      try { sourceNode.disconnect(); } catch(e){}
+    }
+
+    sourceNode = audioCtx.createBufferSource();
+    sourceNode.buffer = audioBuffer;
+    sourceNode.connect(fadeGainNode);
+    sourceNode.start(0, offset);
+
+    playStartWall = performance.now();
+    playStartOfs  = offset;
+  }
+
+  function startPlayback() {
+    if (!audioBuffer) return;
+    ensureAudioCtx();
+    if (!fadeGainNode) buildGraph();
+
+    isPlaying = true;
+    btnPlay.innerHTML = '&#10074;&#10074;';
+    btnPlay.classList.add('playing');
+
+    // Determine where in the active segment we should start
+    const origIdx = playOrder[activeSegIdx];
+    const segStart = origIdx * segDuration;
+
+    // If currentTime is within this segment, resume from currentTime
+    // Otherwise start from segment beginning
+    let ofs;
+    if (currentTime >= segStart && currentTime < segStart + segDuration) {
+      ofs = currentTime;
+    } else {
+      ofs = segStart;
+      currentTime = segStart;
+    }
+
+    // Fade in
+    fadeGainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+    fadeGainNode.gain.linearRampToValueAtTime(1.0, audioCtx.currentTime + CROSSFADE_MS / 1000);
+
+    startSource(ofs);
+    tick();
+  }
+
+  function stopPlayback() {
+    isPlaying = false;
+    btnPlay.innerHTML = '&#9654;';
+    btnPlay.classList.remove('playing');
+
+    if (sourceNode) {
+      try { sourceNode.stop(); } catch(e){}
+      try { sourceNode.disconnect(); } catch(e){}
+      sourceNode = null;
+    }
+
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+  }
+
+  function togglePlayPause() {
+    if (!audioBuffer) return;
+    if (isPlaying) {
+      // Capture current time before stopping
+      updateCurrentTime();
+      stopPlayback();
+    } else {
+      startPlayback();
+    }
+  }
+
+  function updateCurrentTime() {
+    if (isPlaying && playStartWall > 0) {
+      const elapsed = (performance.now() - playStartWall) / 1000;
+      currentTime = playStartOfs + elapsed;
+    }
+  }
+
+  function tick() {
+    if (!isPlaying) return;
+
+    updateCurrentTime();
+
+    const origIdx  = playOrder[activeSegIdx];
+    const segEnd   = (origIdx + 1) * segDuration;
+
+    // Check if we've reached the end of the current segment
+    if (currentTime >= segEnd - 0.001) {
+      // Move to next segment in play order
+      advanceToNextSegment();
+      return;
+    }
+
+    updatePlayhead();
+    updateSegProgress();
+    updateStatus();
+
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function advanceToNextSegment() {
+    activeSegIdx++;
+    if (activeSegIdx >= NUM_SEGMENTS) {
+      // Loop back to segment 1 (index 0 in playOrder)
+      activeSegIdx = 0;
+    }
+
+    crossfadeToSegment(activeSegIdx);
+  }
+
+  // Crossfade to a segment at a specific time offset (defaults to segment start)
+  function crossfadeToSegment(segIdx, seekOffset) {
+    const origIdx = playOrder[segIdx];
+    const segStart = origIdx * segDuration;
+    const targetTime = (seekOffset !== undefined) ? seekOffset : segStart;
+
+    // Fade out current
+    const now = audioCtx.currentTime;
+    fadeGainNode.gain.cancelScheduledValues(now);
+    fadeGainNode.gain.setValueAtTime(fadeGainNode.gain.value, now);
+    fadeGainNode.gain.linearRampToValueAtTime(0, now + CROSSFADE_MS / 1000);
+
+    // After fade out, switch to new segment
+    setTimeout(() => {
+      if (!isPlaying) return;
+
+      currentTime = targetTime;
+      activeSegIdx = segIdx;
+      startSource(targetTime);
+
+      // Fade in
+      const t = audioCtx.currentTime;
+      fadeGainNode.gain.cancelScheduledValues(t);
+      fadeGainNode.gain.setValueAtTime(0, t);
+      fadeGainNode.gain.linearRampToValueAtTime(1.0, t + CROSSFADE_MS / 1000);
+
+      updateSegHighlights();
+      tick();
+    }, CROSSFADE_MS);
+  }
+
+  // Jump to an original segment index and optionally play
+  function jumpToOriginalSegment(origIdx, autoPlay) {
+    // Find this segment's position in playOrder
+    let orderIdx = playOrder.indexOf(origIdx);
+    if (orderIdx < 0) orderIdx = 0;
+
+    activeSegIdx = orderIdx;
+    currentTime = origIdx * segDuration;
+
+    updateSegHighlights();
+    updatePlayhead();
+    updateSegProgress();
+    updateStatus();
+
+    if (autoPlay) {
+      if (isPlaying) {
+        // Crossfade jump
+        crossfadeToSegment(orderIdx);
+      } else {
+        startPlayback();
+      }
+    }
+  }
+
+  // Jump to next/prev in play order
+  function jumpNextInOrder() {
+    if (!audioBuffer) return;
+    let next = activeSegIdx + 1;
+    if (next >= NUM_SEGMENTS) next = 0;
+    const origIdx = playOrder[next];
+    jumpToOriginalSegment(origIdx, true);
+  }
+
+  function jumpPrevInOrder() {
+    if (!audioBuffer) return;
+    let prev = activeSegIdx - 1;
+    if (prev < 0) prev = NUM_SEGMENTS - 1;
+    const origIdx = playOrder[prev];
+    jumpToOriginalSegment(origIdx, true);
+  }
+
+  // Stop and reset to segment 1
+  function fullStop() {
+    stopPlayback();
+    currentTime = 0;
+    activeSegIdx = 0;
+    updatePlayhead();
+    updateSegHighlights();
+    updateSegProgress();
+    updateStatus();
+  }
+
+  // ── Playhead / status ─────────────────────────────────────
+  function updatePlayhead() {
+    if (!totalDuration) return;
+    const pct = clamp(currentTime / totalDuration, 0, 1);
+    playheadEl.style.left = (pct * 100) + '%';
+  }
+
+  function updateStatus() {
+    if (!audioBuffer) return;
+    const origIdx = playOrder[activeSegIdx];
+    const orderStr = playOrder.slice(1).map(i => i + 1).join(', ');
+    statusLine.textContent = 'Active: Seg ' + (origIdx + 1) + '  |  Order: [1, ' + orderStr + ']';
+  }
+
+  // ── Waveform click to seek ────────────────────────────────
+  waveCanvas.addEventListener('click', (e) => {
+    if (!audioBuffer) return;
+    const rect = waveCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pct = clamp(x / rect.width, 0, 1);
+    const seekTime = pct * totalDuration;
+
+    // Determine which original segment this falls in
+    const origIdx = Math.min(Math.floor(seekTime / segDuration), NUM_SEGMENTS - 1);
+
+    // Update currentTime and active segment
+    currentTime = seekTime;
+    const orderIdx = playOrder.indexOf(origIdx);
+    activeSegIdx = orderIdx >= 0 ? orderIdx : 0;
+
+    updatePlayhead();
+    updateSegHighlights();
+    updateSegProgress();
+    updateStatus();
+
+    if (isPlaying) {
+      // Restart source from exact seek position
+      crossfadeToSegment(activeSegIdx, seekTime);
+    } else {
+      // Autoplay on waveform click for consistency
+      startPlayback();
+    }
+  });
+
+  // ── File loading ──────────────────────────────────────────
+  function handleFile(file) {
+    if (!file) return;
+    unlockAudio();
+    fileNameEl.textContent = 'Loading...';
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      loadAudioBuffer(e.target.result.slice(0), file.name);
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  fileInput.addEventListener('change', (e) => {
+    handleFile(e.target.files[0]);
+  });
+
+  // Drag and drop on upload area
+  uploadArea.addEventListener('click', () => fileInput.click());
+  uploadArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadArea.classList.add('dragover');
+  });
+  uploadArea.addEventListener('dragleave', () => {
+    uploadArea.classList.remove('dragover');
+  });
+  uploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadArea.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) handleFile(files[0]);
+  });
+
+  // ── Transport button handlers ─────────────────────────────
+  btnPlay.addEventListener('click', togglePlayPause);
+  btnStop.addEventListener('click', fullStop);
+  btnPrev.addEventListener('click', jumpPrevInOrder);
+  btnNext.addEventListener('click', jumpNextInOrder);
+
+  // ── Reset order ───────────────────────────────────────────
+  btnResetOrder.addEventListener('click', () => {
+    playOrder = [0, 1, 2, 3, 4, 5];
+    // Rebuild sortable list to reflect original order
+    const children = Array.from(sortableList.children);
+    children.sort((a, b) => parseInt(a.dataset.origIdx) - parseInt(b.dataset.origIdx));
+    children.forEach(c => sortableList.appendChild(c));
+    updateSegHighlights();
+    updateStatus();
+  });
+
+  // ── Help panel ────────────────────────────────────────────
+  btnHelp.addEventListener('click', () => {
+    helpOpen = !helpOpen;
+    helpPanel.style.display = helpOpen ? 'block' : 'none';
+    btnHelp.classList.toggle('active', helpOpen);
+
+    if (helpOpen) {
+      startAnalyzer();
+    } else {
+      stopAnalyzer();
+    }
+  });
+
+  // ── Spectrum analyzer ─────────────────────────────────────
+  function startAnalyzer() {
+    if (analyzerRafId) return;
+    drawAnalyzer();
+  }
+
+  function stopAnalyzer() {
+    if (analyzerRafId) {
+      cancelAnimationFrame(analyzerRafId);
+      analyzerRafId = null;
+    }
+    // Clear canvas
+    const ctx = analyzerCanvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = analyzerCanvas.getBoundingClientRect();
+    analyzerCanvas.width = rect.width * dpr;
+    analyzerCanvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+  }
+
+  function drawAnalyzer() {
+    if (!helpOpen) return;
+
+    const ctx = analyzerCanvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = analyzerCanvas.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+
+    // Resize if needed
+    const cw = Math.round(w * dpr);
+    const ch = Math.round(h * dpr);
+    if (analyzerCanvas.width !== cw || analyzerCanvas.height !== ch) {
+      analyzerCanvas.width = cw;
+      analyzerCanvas.height = ch;
+      ctx.scale(dpr, dpr);
+    }
+
+    ctx.clearRect(0, 0, w, h);
+
+    if (analyserNode && isPlaying) {
+      const bufLen = analyserNode.frequencyBinCount;
+      const data = new Uint8Array(bufLen);
+      analyserNode.getByteFrequencyData(data);
+
+      // Draw bars
+      const barCount = Math.min(bufLen, Math.floor(w / 3));
+      const barWidth = w / barCount;
+
+      for (let i = 0; i < barCount; i++) {
+        const val = data[i] / 255;
+        const barH = val * h;
+        const hue = 220 + (i / barCount) * 60;
+        ctx.fillStyle = 'hsla(' + hue + ', 80%, 60%, 0.8)';
+        ctx.fillRect(i * barWidth, h - barH, barWidth - 1, barH);
+      }
+    } else {
+      // Draw placeholder text
+      ctx.fillStyle = '#555';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Analyzer active during playback', w / 2, h / 2 + 4);
+    }
+
+    analyzerRafId = requestAnimationFrame(drawAnalyzer);
+  }
+
+  // ── Solo band buttons ─────────────────────────────────────
+  soloButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const freq = parseInt(btn.dataset.freq);
+      soloFreq = freq;
+
+      // Update active state
+      soloButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      updateSoloRouting();
+    });
+  });
+
+  // ── Keyboard shortcuts ────────────────────────────────────
+  document.addEventListener('keydown', (e) => {
+    // Don't intercept if typing in an input
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    if (e.code === 'Space') {
+      e.preventDefault();
+      togglePlayPause();
+    } else if (e.code === 'ArrowLeft') {
+      e.preventDefault();
+      jumpPrevInOrder();
+    } else if (e.code === 'ArrowRight') {
+      e.preventDefault();
+      jumpNextInOrder();
+    } else if (e.key >= '1' && e.key <= '6') {
+      e.preventDefault();
+      const origIdx = parseInt(e.key) - 1;
+      jumpToOriginalSegment(origIdx, true);
+    }
+  });
+
+  // ── Auto-load demo file ───────────────────────────────────
+  (async function tryLoadDemo() {
+    try {
+      const resp = await fetch('oo_o_ah_a_e_pinknoise.wav');
+      if (!resp.ok) return;
+      const buf = await resp.arrayBuffer();
+      ensureAudioCtx();
+      loadAudioBuffer(buf, 'oo_o_ah_a_e_pinknoise.wav (demo)');
+    } catch (e) {
+      // Silently fail — user can upload manually
+    }
+  })();
+
+})();
+</script>
+</body>
+</html>
