@@ -1,7 +1,11 @@
-## oo-oh-a-ee
-# vowels and the frequency spectrum
+# oo-oh-a-ee
+a webapp by adam borecki with help from Claude code
 
-practice listening.
+## about
+use this tool to practice listening to the frequency spectrum and imagining that you're hearing different vowels.
+
+## practice
+practice listening by reorganizing waveforms.
 
 try it out:
 
