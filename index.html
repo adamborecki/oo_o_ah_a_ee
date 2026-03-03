@@ -25,6 +25,8 @@
     --active: #ff9f43;
     --active-bg: #ff9f4318;
     --danger: #ff5566;
+    --success: #44dd88;
+    --success-bg: #44dd8818;
   }
 
   html, body {
@@ -298,6 +300,12 @@
   }
   .action-btn:hover { background: var(--border); }
   .action-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .action-btn.check-btn {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .action-btn.check-btn:hover { background: #4a79ee; }
 
   /* ── Help panel ────────────────────────────────────────── */
   #help-panel {
@@ -365,6 +373,67 @@
     padding: 10px 0;
     display: none;
   }
+
+  /* ── Feedback area ───────────────────────────────────────── */
+  #feedback-area {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-top: 8px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  #feedback-area.visible { display: block; }
+  #feedback-area .score {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  #feedback-area .score.perfect { color: var(--success); }
+  #feedback-area .hint {
+    color: var(--text-dim);
+    margin-top: 6px;
+  }
+  #feedback-area .hint strong { color: var(--text); }
+
+  /* ── Segment check indicators ────────────────────────────── */
+  .seg-check {
+    position: relative;
+    z-index: 1;
+    flex-shrink: 0;
+    margin-left: 6px;
+    font-size: 0.85rem;
+    width: 20px;
+    text-align: center;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .seg-check.show { opacity: 1; }
+  .seg-check.correct { color: var(--success); }
+  .seg-check.incorrect { color: var(--danger); }
+
+  /* ── Answer key indicator ────────────────────────────────── */
+  #answer-key-indicator {
+    display: none;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--success);
+    padding: 2px 0;
+  }
+  #answer-key-indicator.visible { display: block; }
+
+  /* ── Confetti canvas ─────────────────────────────────────── */
+  #confetti-canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1000;
+    display: none;
+  }
 </style>
 </head>
 <body>
@@ -389,6 +458,9 @@
     <input type="file" id="file-input" accept=".wav,audio/wav">
   </div>
   <div id="file-name"></div>
+
+  <!-- Hidden input for answer key JSON import -->
+  <input type="file" id="answer-key-input" accept=".json,application/json" style="display:none;">
 
   <!-- Waveform -->
   <div id="waveform-wrap">
@@ -417,8 +489,17 @@
   <!-- Actions row -->
   <div id="actions-row">
     <button class="action-btn" id="btn-reset-order">Reset order</button>
+    <button class="action-btn" id="btn-export-order">Export order</button>
+    <button class="action-btn" id="btn-import-answer">Load answer key</button>
+    <button class="action-btn check-btn" id="btn-check-answer" style="display:none;">Check answer</button>
     <button class="action-btn" id="btn-help">Help</button>
   </div>
+
+  <!-- Answer key indicator -->
+  <div id="answer-key-indicator">Answer key loaded</div>
+
+  <!-- Feedback area for check results -->
+  <div id="feedback-area"></div>
 
   <!-- Help panel -->
   <div id="help-panel">
@@ -447,6 +528,8 @@
     Space = Play/Pause &middot; 1-6 = Jump to original segment &middot; &larr;&rarr; = Prev/Next
   </div>
 </div>
+
+<canvas id="confetti-canvas"></canvas>
 
 <script>
 // ════════════════════════════════════════════════════════════
@@ -481,6 +564,13 @@
   const keyHints        = document.getElementById('key-hints');
   const audioUnlockDiv  = document.getElementById('audio-unlock');
   const audioUnlockBtn  = document.getElementById('audio-unlock-btn');
+  const answerKeyInput     = document.getElementById('answer-key-input');
+  const btnExportOrder     = document.getElementById('btn-export-order');
+  const btnImportAnswer    = document.getElementById('btn-import-answer');
+  const btnCheckAnswer     = document.getElementById('btn-check-answer');
+  const feedbackArea       = document.getElementById('feedback-area');
+  const answerKeyIndicator = document.getElementById('answer-key-indicator');
+  const confettiCanvas     = document.getElementById('confetti-canvas');
 
   // ── Audio state ───────────────────────────────────────────
   let audioCtx       = null;
@@ -515,6 +605,11 @@
   // Analyzer state
   let helpOpen = false;
   let analyzerRafId = null;
+
+  // Answer checking state
+  let answerKey = null;        // decoded correctOrder array [seg, seg, seg, seg, seg]
+  let checkAttempts = 0;
+  let confettiAnimId = null;
 
   // Reference frequencies for analyzer labels
   const REF_FREQS = [
@@ -675,6 +770,13 @@
     activeSegIdx = 0;
     playOrder = [0, 1, 2, 3, 4, 5];
 
+    // Clear answer key state for new WAV
+    answerKey = null;
+    checkAttempts = 0;
+    btnCheckAnswer.style.display = 'none';
+    answerKeyIndicator.classList.remove('visible');
+    feedbackArea.classList.remove('visible');
+
     buildGraph();
     drawWaveform();
     buildSegmentList();
@@ -809,6 +911,12 @@
     num.textContent = '#' + (origIdx + 1);
     row.appendChild(num);
 
+    if (!locked) {
+      const check = document.createElement('span');
+      check.className = 'seg-check';
+      row.appendChild(check);
+    }
+
     // Click to jump + play
     row.addEventListener('click', (e) => {
       if (e.target.classList.contains('seg-drag-handle')) return;
@@ -826,6 +934,8 @@
     });
     playOrder = newOrder;
     updateStatus();
+    feedbackArea.classList.remove('visible');
+    clearCheckIndicators();
   }
 
   function updateSegHighlights() {
@@ -1140,6 +1250,8 @@
     children.forEach(c => sortableList.appendChild(c));
     updateSegHighlights();
     updateStatus();
+    feedbackArea.classList.remove('visible');
+    clearCheckIndicators();
   });
 
   // ── Help panel ────────────────────────────────────────────
@@ -1305,6 +1417,273 @@
       updateSoloRouting();
     });
   });
+
+  // ── Answer checking ──────────────────────────────────────
+
+  function exportCurrentOrder() {
+    if (!audioBuffer) return;
+    const raw = JSON.stringify(playOrder.slice(1));
+    const data = {
+      version: 1,
+      info: 'Vowel EQ Segment Sorter - Answer Key',
+      d: btoa(raw)
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'answer-key.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function importAnswerKey(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!data.d || typeof data.d !== 'string') {
+          alert('Invalid answer key format.');
+          return;
+        }
+        let decoded;
+        try {
+          decoded = JSON.parse(atob(data.d));
+        } catch (decErr) {
+          alert('Could not decode answer key data.');
+          return;
+        }
+        if (!Array.isArray(decoded) || decoded.length !== 5) {
+          alert('Answer key must contain exactly 5 segment values.');
+          return;
+        }
+        const sorted = [...decoded].sort().join(',');
+        if (sorted !== '1,2,3,4,5') {
+          alert('Answer key must contain segment indices 1 through 5.');
+          return;
+        }
+        answerKey = decoded;
+        checkAttempts = 0;
+        btnCheckAnswer.style.display = 'inline-flex';
+        answerKeyIndicator.classList.add('visible');
+        feedbackArea.classList.remove('visible');
+        clearCheckIndicators();
+      } catch (err) {
+        alert('Could not parse answer key JSON.');
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function checkAnswer() {
+    if (!answerKey) return;
+    checkAttempts++;
+
+    const current = playOrder.slice(1);
+    const correct = answerKey;
+
+    const positionCorrect = [];
+    for (let i = 0; i < 5; i++) {
+      positionCorrect.push(current[i] === correct[i]);
+    }
+    const numCorrect = positionCorrect.filter(Boolean).length;
+
+    updateCheckIndicators(positionCorrect);
+
+    if (numCorrect === 5) {
+      showPerfectFeedback();
+      launchConfetti();
+      return;
+    }
+
+    const hints = generateHints(current, correct, positionCorrect, numCorrect);
+    showFeedback(numCorrect, hints);
+  }
+
+  function generateHints(current, correct, positionCorrect, numCorrect) {
+    const hints = [];
+
+    const ooCorrect = positionCorrect[0];
+    const eeCorrect = positionCorrect[4];
+
+    if (!ooCorrect && !eeCorrect) {
+      hints.push(
+        'Start by finding the extremes \u2014 listen for the deep warmth of ' +
+        '<strong>OO (250 Hz)</strong> versus the bright sizzle of ' +
+        '<strong>EE (4 kHz)</strong>. These are the easiest to tell apart.'
+      );
+    } else if (!ooCorrect) {
+      hints.push(
+        'You found EE at the top \u2014 nice! Now listen for the deepest, ' +
+        'warmest segment for the <strong>OO (250 Hz)</strong> position.'
+      );
+    } else if (!eeCorrect) {
+      hints.push(
+        'You found OO at the bottom \u2014 nice! Now listen for the brightest, ' +
+        'most sizzly segment for the <strong>EE (4 kHz)</strong> position.'
+      );
+    }
+
+    if (ooCorrect && eeCorrect) {
+      hints.push(
+        'Extremes are locked in! Focus on the middle three: ' +
+        '<strong>O (500 Hz)</strong>, <strong>AH (1 kHz)</strong>, <strong>A (2 kHz)</strong>.'
+      );
+
+      const middleCorrect = [positionCorrect[1], positionCorrect[2], positionCorrect[3]];
+      const middleNumCorrect = middleCorrect.filter(Boolean).length;
+
+      if (middleNumCorrect === 0) {
+        if (current[1] === correct[2] && current[2] === correct[1]) {
+          hints.push('Two adjacent middle segments might be swapped. Compare them back-to-back.');
+        } else if (current[2] === correct[3] && current[3] === correct[2]) {
+          hints.push('Two adjacent middle segments might be swapped. Compare them back-to-back.');
+        } else {
+          hints.push(
+            'Try comparing the middle segments in pairs. ' +
+            '<strong>O (500 Hz)</strong> is warmer/fuller than <strong>AH (1 kHz)</strong>, ' +
+            'and <strong>AH</strong> is warmer than <strong>A (2 kHz)</strong>.'
+          );
+        }
+      } else if (middleNumCorrect === 1) {
+        hints.push(
+          'One of the middle three is in the right place. ' +
+          'The other two may be swapped \u2014 listen carefully to their relative brightness.'
+        );
+      }
+    }
+
+    if (checkAttempts >= 3 && numCorrect <= 2) {
+      hints.push(
+        'Tip: Try using the Help panel\'s <strong>solo filters</strong> to isolate each ' +
+        'frequency band and match it to what you hear in each segment.'
+      );
+    }
+
+    return hints;
+  }
+
+  function showFeedback(numCorrect, hints) {
+    var html = '<div class="score">' + numCorrect + '/5 segments in the correct position</div>';
+    hints.forEach(function(h) {
+      html += '<div class="hint">' + h + '</div>';
+    });
+    feedbackArea.innerHTML = html;
+    feedbackArea.classList.add('visible');
+  }
+
+  function showPerfectFeedback() {
+    feedbackArea.innerHTML =
+      '<div class="score perfect">\u2728 5/5 \u2014 Perfect! You nailed it! \u2728</div>' +
+      '<div class="hint">You correctly identified all five vowel EQ frequencies from low to high.</div>';
+    feedbackArea.classList.add('visible');
+  }
+
+  function updateCheckIndicators(positionCorrect) {
+    const rows = sortableList.querySelectorAll('.seg-row');
+    rows.forEach(function(row, i) {
+      const check = row.querySelector('.seg-check');
+      if (!check) return;
+      if (i < positionCorrect.length) {
+        check.textContent = positionCorrect[i] ? '\u2713' : '\u2717';
+        check.className = 'seg-check show ' + (positionCorrect[i] ? 'correct' : 'incorrect');
+      }
+    });
+  }
+
+  function clearCheckIndicators() {
+    document.querySelectorAll('.seg-check').forEach(function(el) {
+      el.textContent = '';
+      el.className = 'seg-check';
+    });
+  }
+
+  // ── Confetti animation ──────────────────────────────────
+
+  function launchConfetti() {
+    const canvas = confettiCanvas;
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    canvas.style.display = 'block';
+
+    const COLORS = ['#ff5566', '#5b8aff', '#44dd88', '#ff9f43', '#d95bff', '#ffdd44', '#44ddff'];
+    const PARTICLE_COUNT = 150;
+    const DURATION = 3000;
+
+    const particles = [];
+    for (var i = 0; i < PARTICLE_COUNT; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * -canvas.height * 0.5,
+        w: 4 + Math.random() * 8,
+        h: 6 + Math.random() * 10,
+        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+        vx: (Math.random() - 0.5) * 4,
+        vy: 2 + Math.random() * 4,
+        rotation: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random() - 0.5) * 0.15,
+        gravity: 0.05 + Math.random() * 0.05,
+      });
+    }
+
+    const startTime = performance.now();
+
+    function drawConfetti(now) {
+      var elapsed = now - startTime;
+      if (elapsed > DURATION) {
+        canvas.style.display = 'none';
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (confettiAnimId) { cancelAnimationFrame(confettiAnimId); confettiAnimId = null; }
+        return;
+      }
+
+      var alpha = elapsed > DURATION - 500 ? (DURATION - elapsed) / 500 : 1;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = alpha;
+
+      particles.forEach(function(p) {
+        p.vy += p.gravity;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rotation += p.rotSpeed;
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rotation);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+      });
+
+      ctx.globalAlpha = 1;
+      confettiAnimId = requestAnimationFrame(drawConfetti);
+    }
+
+    if (confettiAnimId) { cancelAnimationFrame(confettiAnimId); confettiAnimId = null; }
+    confettiAnimId = requestAnimationFrame(drawConfetti);
+  }
+
+  // ── Export / Import / Check event listeners ─────────────
+
+  btnExportOrder.addEventListener('click', exportCurrentOrder);
+
+  btnImportAnswer.addEventListener('click', function() {
+    answerKeyInput.click();
+  });
+
+  answerKeyInput.addEventListener('change', function(e) {
+    if (e.target.files.length > 0) {
+      importAnswerKey(e.target.files[0]);
+    }
+    answerKeyInput.value = '';
+  });
+
+  btnCheckAnswer.addEventListener('click', checkAnswer);
 
   // ── Keyboard shortcuts ────────────────────────────────────
   document.addEventListener('keydown', (e) => {
